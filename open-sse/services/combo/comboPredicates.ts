@@ -195,6 +195,10 @@ const REQUEST_SCOPED_UPSTREAM_ERROR_CODES: Record<string, true> = {
   context_length_exceeded: true,
   upstream_empty_response: true,
   upstream_response_failed: true,
+  // Semantic empty output (metadata-only terminal SSE) is an upstream
+  // condition, not a credential fault — never cool the account or trip the
+  // provider breaker for it.
+  upstream_terminal_without_model_output: true,
   // Local combo per-target timer (targetTimeoutRunner) — not a connection health signal.
   combo_target_timeout: true,
   // Local limiter queue-capacity codes — not a provider/connection health signal.
@@ -213,6 +217,7 @@ export function isRequestScopedUpstreamFailure(error?: {
   return (
     REQUEST_SCOPED_UPSTREAM_ERROR_CODES[code] === true ||
     type === "context_length_exceeded" ||
+    type === "empty_content" ||
     type === "local_queue_capacity"
   );
 }

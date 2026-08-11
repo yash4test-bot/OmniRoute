@@ -123,16 +123,12 @@ import {
 } from "./catalogCache";
 
 export {
-  CATALOG_STALE_WHILE_REVALIDATE_MS,
-  getCatalogStaleWhileRevalidateMs,
   __resetCatalogBuilderRunsForTest,
   __getCatalogBuilderRunsForTest,
   __expireCatalogCacheForTest,
   __setCatalogCacheEntryForTest,
   __flushCatalogBackgroundRefreshForTest,
   __forceCatalogInFlightRejectionForTest,
-  __setCatalogStaleWhileRevalidateAccessorForTest,
-  __setCatalogStaleWhileRevalidateMsForTest,
 } from "./catalogCache";
 export type { CachedCatalog, CatalogCachePolicy } from "./catalogCache";
 

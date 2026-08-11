@@ -499,10 +499,16 @@ export async function executeChatWithBreaker({
             onStreamFailure: async (failure: any) => {
               if (isShadowTraffic) return;
               if (!credentials.connectionId) return;
+              // Semantic empty output (metadata-only terminal SSE) is an upstream
+              // condition, not a credential fault — never cool the account for it.
+              const isSemanticEmptyStreamFailure =
+                Number(failure?.status) === 502 &&
+                /empty content/i.test(String(failure?.message || ""));
               if (
                 Number(failure?.status) === 499 ||
                 failure?.code === "client_disconnected" ||
                 failure?.type === "client_disconnected" ||
+                isSemanticEmptyStreamFailure ||
                 isLocalStreamLifecycleError(failure?.message ?? failure) // client abort, #4602
               ) {
                 return;
