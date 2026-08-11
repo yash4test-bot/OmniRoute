@@ -140,6 +140,7 @@ export function isProviderModelHidden(
   }
   return hiddenModelsByProvider.get(providerId)?.has(modelId) ?? false;
 }
+
 /** Matches the provider-page "Test All Models" concurrency (#chunks of 3). */
 export const PROVIDER_TEST_CHUNK_SIZE = 3;
 
