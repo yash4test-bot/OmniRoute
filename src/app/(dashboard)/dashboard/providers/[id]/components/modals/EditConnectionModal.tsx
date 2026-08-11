@@ -123,7 +123,7 @@ export default function EditConnectionModal({
     accountId: "",
     codexReasoningEffort: "medium",
     codexServiceTier: "default" as CodexServiceTier,
-    codexOpenaiStoreEnabled: false,
+    openaiResponsesStoreEnabled: false,
     preserveEncryptedReasoning: false,
     consoleApiKey: "",
     newApiUserId: "",
@@ -330,7 +330,7 @@ export default function EditConnectionModal({
         accountId: existingAccountId,
         codexReasoningEffort: codexRequestDefaults.reasoningEffort,
         codexServiceTier: codexRequestDefaults.serviceTier ?? "default",
-        codexOpenaiStoreEnabled: connection.providerSpecificData?.openaiStoreEnabled === true,
+        openaiResponsesStoreEnabled: connection.providerSpecificData?.openaiStoreEnabled === true,
         preserveEncryptedReasoning:
           connection.providerSpecificData?.preserveEncryptedReasoning === true,
         consoleApiKey: existingConsoleApiKey,
@@ -630,8 +630,6 @@ export default function EditConnectionModal({
               ? { serviceTier: formData.codexServiceTier }
               : {}),
           };
-          updates.providerSpecificData.openaiStoreEnabled =
-            formData.codexOpenaiStoreEnabled === true;
         }
         if (isAntigravityFamily) {
           updates.providerSpecificData.projectId = trimmedCloudCodeProjectId || null;
@@ -658,6 +656,8 @@ export default function EditConnectionModal({
       if (isResponsesConnection && updates.providerSpecificData) {
         updates.providerSpecificData.preserveEncryptedReasoning =
           formData.preserveEncryptedReasoning === true;
+        updates.providerSpecificData.openaiStoreEnabled =
+          formData.openaiResponsesStoreEnabled === true;
       }
       const freeOnlyChanged =
         showFreeModelsToggle &&
@@ -698,6 +698,16 @@ export default function EditConnectionModal({
         "preserveEncryptedReasoningDescription",
         "Forward encrypted Responses reasoning items supplied by the client."
       )}
+    />
+  ) : null;
+  const openaiResponsesStoreToggle = isResponsesConnection ? (
+    <Toggle
+      checked={formData.openaiResponsesStoreEnabled}
+      onChange={(checked) =>
+        setFormData({ ...formData, openaiResponsesStoreEnabled: checked })
+      }
+      label={t("openaiResponsesStoreLabel")}
+      description={t("openaiResponsesStoreDescription")}
     />
   ) : null;
   return (
@@ -755,12 +765,6 @@ export default function EditConnectionModal({
                 "Default uses the normal Codex tier. Priority shows as Fast; Flex uses the flex service tier when available."
               )}
             />
-            <Toggle
-              checked={formData.codexOpenaiStoreEnabled}
-              onChange={(checked) => setFormData({ ...formData, codexOpenaiStoreEnabled: checked })}
-              label={t("openaiResponsesStoreLabel")}
-              description={t("openaiResponsesStoreDescription")}
-            />
           </div>
         )}
         {isClaude && (
@@ -794,6 +798,7 @@ export default function EditConnectionModal({
             />
           )}
           {preserveEncryptedReasoningToggle}
+          {openaiResponsesStoreToggle}
           <Toggle
             checked={formData.disableCooling}
             onChange={(checked) => setFormData({ ...formData, disableCooling: checked })}
