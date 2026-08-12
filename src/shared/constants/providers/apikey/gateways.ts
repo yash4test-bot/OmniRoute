@@ -1196,19 +1196,4 @@ export const APIKEY_PROVIDERS_GATEWAYS = {
     authHint:
       "Get API key at naga.ac — Google/GitHub/Discord signup available.",
   },
-  chatanywhere: {
-    id: "chatanywhere",
-    alias: "chtany",
-    name: "ChatAnywhere",
-    icon: "chat",
-    color: "#10B981",
-    textIcon: "CA",
-    website: "https://api.chatanywhere.tech",
-    hasFree: true,
-    freeNote:
-      "Free tier: 5 req/day for GPT-5/4o/4.1, 30/day DeepSeek, 200/day gpt-4o-mini. Personal non-commercial use only — see chatanywhere/GPT_API_free. Requires GitHub-account-gated API key.",
-    passthroughModels: true,
-    authHint:
-      "Get free API key at api.chatanywhere.tech — requires GitHub account signup.",
-  },
 };
