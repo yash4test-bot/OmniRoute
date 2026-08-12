@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   sanitizeAutoSyncIntervalMs,
   DEFAULT_AUTO_SYNC_INTERVAL_MS,
+  DEFAULT_FETCH_TIMEOUT_MS,
   MIN_AUTO_SYNC_INTERVAL_MS,
   parseOmniRoutePluginOptions,
   resolveOmniRoutePluginOptions,
@@ -33,9 +34,37 @@ test("sanitizeAutoSyncIntervalMs: keeps valid values", () => {
   assert.equal(sanitizeAutoSyncIntervalMs(300_000), 300_000);
 });
 
+test("resolveOmniRoutePluginOptions: fetchTimeoutMs defaults to 60000", () => {
+  const resolved = resolveOmniRoutePluginOptions({ providerId: "omniroute" });
+  assert.equal(resolved.fetchTimeoutMs, DEFAULT_FETCH_TIMEOUT_MS);
+  assert.equal(resolved.fetchTimeoutMs, 60_000);
+});
+
+test("resolveOmniRoutePluginOptions: fetchTimeoutMs honors explicit value", () => {
+  const resolved = resolveOmniRoutePluginOptions({
+    providerId: "omniroute",
+    fetchTimeoutMs: 120_000,
+  });
+  assert.equal(resolved.fetchTimeoutMs, 120_000);
+});
+
+test("resolveOmniRoutePluginOptions: fetchTimeoutMs rejects non-positive values", () => {
+  assert.equal(
+    resolveOmniRoutePluginOptions({ providerId: "omniroute", fetchTimeoutMs: 0 }).fetchTimeoutMs,
+    DEFAULT_FETCH_TIMEOUT_MS
+  );
+  assert.equal(
+    resolveOmniRoutePluginOptions({ providerId: "omniroute", fetchTimeoutMs: -5 }).fetchTimeoutMs,
+    DEFAULT_FETCH_TIMEOUT_MS
+  );
+});
+
 test("parseOmniRoutePluginOptions accepts autoSyncIntervalMs including 0", () => {
   assert.equal(parseOmniRoutePluginOptions({ autoSyncIntervalMs: 0 }).autoSyncIntervalMs, 0);
-  assert.equal(parseOmniRoutePluginOptions({ autoSyncIntervalMs: 120_000 }).autoSyncIntervalMs, 120_000);
+  assert.equal(
+    parseOmniRoutePluginOptions({ autoSyncIntervalMs: 120_000 }).autoSyncIntervalMs,
+    120_000
+  );
 });
 
 test("resolveOmniRoutePluginOptions defaults autoSyncIntervalMs to 300000", () => {

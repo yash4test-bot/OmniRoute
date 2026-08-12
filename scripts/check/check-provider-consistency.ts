@@ -14,7 +14,13 @@ import { assertNoStale } from "./lib/allowlist.mjs";
 
 // Entradas registry-only conhecidas (meia-registro pré-existente). Cada uma com
 // justificativa. Remover daqui ao registrar o provider em providers.ts.
-export const KNOWN_REGISTRY_ONLY: Record<string, string> = {};
+export const KNOWN_REGISTRY_ONLY: Record<string, string> = {
+  // ChatAnywhere is a free aggregator gateway (api.chatanywhere.org) registered
+  // as a provider in the registry but not declared as a canonical AI provider in
+  // providers.ts (only listed as a gateway alias). Upstream #6674 added the
+  // registry entry without the canonical declaration — allowlisted until then.
+  chatanywhere: "registry-only aggregator gateway; no canonical AI_PROVIDERS entry (#6674)",
+};
 
 /** Ids do REGISTRY que não são providers canônicos e não estão na allowlist. */
 export function findOrphanRegistryIds(

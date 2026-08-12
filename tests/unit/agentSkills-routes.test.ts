@@ -101,15 +101,15 @@ test.after(() => {
 // GET /api/agent-skills
 // ═════════════════════════════════════════════════════════════════════════════
 
-test("GET /api/agent-skills — returns 45 skills with count and coverage", async () => {
+test("GET /api/agent-skills — returns 46 skills with count and coverage", async () => {
   const req = makeRequest("GET", "http://localhost/api/agent-skills");
   const res = await listRoute.GET(req);
 
   assert.equal(res.status, 200);
   const body = (await res.json()) as { skills: unknown[]; count: number; coverage: unknown };
-  assert.equal(body.count, 45, `Expected 45 skills but got ${body.count}`);
+  assert.equal(body.count, 46, `Expected 46 skills but got ${body.count}`);
   assert.equal(Array.isArray(body.skills), true);
-  assert.equal(body.skills.length, 45);
+  assert.equal(body.skills.length, 46);
   assert.ok(body.coverage !== undefined, "coverage should be present");
 });
 

@@ -203,6 +203,15 @@ const optionsSchema = z
      * to 60000. Default when unset: 300000.
      */
     autoSyncIntervalMs: z.number().int().nonnegative().optional(),
+    /**
+     * Abort timeout for catalog fetches (`/v1/models`, `/api/combos`, and
+     * friends). The OmniRoute gateway lazily builds its catalog on the first
+     * cold request (health-checking every connected provider), which can take
+     * 40s+ on a fresh gateway start — longer than the hardcoded 10s, so a
+     * cold opencode start used to publish an empty stub catalog and hide all
+     * OmniRoute models from new sessions. Default: 60000.
+     */
+    fetchTimeoutMs: z.number().positive().optional(),
     baseURL: z.string().url().optional(),
     managementReadToken: z.string().min(1).optional(),
     features: featuresSchema.optional(),
@@ -288,6 +297,9 @@ export const PLUGIN_GIT_HASH: string =
 
 export const DEFAULT_MODEL_CACHE_TTL_MS = 300_000 as const;
 
+/** Default abort timeout for catalog fetches (see `fetchTimeoutMs`). */
+export const DEFAULT_FETCH_TIMEOUT_MS = 60_000 as const;
+
 /** Default background auto-discovery interval (matches modelCacheTtl default). */
 export const DEFAULT_AUTO_SYNC_INTERVAL_MS = 300_000 as const;
 
@@ -339,7 +351,7 @@ function trimLeadingDashes(value: string): string {
 export function resolveOmniRoutePluginOptions(opts?: OmniRoutePluginOptions): Required<
   Pick<
     OmniRoutePluginOptions,
-    "providerId" | "displayName" | "modelCacheTtl" | "autoSyncIntervalMs"
+    "providerId" | "displayName" | "modelCacheTtl" | "autoSyncIntervalMs" | "fetchTimeoutMs"
   >
 > & {
   /**
@@ -375,12 +387,17 @@ export function resolveOmniRoutePluginOptions(opts?: OmniRoutePluginOptions): Re
       ? opts.modelCacheTtl
       : DEFAULT_MODEL_CACHE_TTL_MS;
   const autoSyncIntervalMs = sanitizeAutoSyncIntervalMs(opts?.autoSyncIntervalMs);
+  const fetchTimeoutMs =
+    typeof opts?.fetchTimeoutMs === "number" && opts.fetchTimeoutMs > 0
+      ? opts.fetchTimeoutMs
+      : DEFAULT_FETCH_TIMEOUT_MS;
   return {
     providerId,
     omnirouteProviderId,
     displayName,
     modelCacheTtl,
     autoSyncIntervalMs,
+    fetchTimeoutMs,
     baseURL: opts?.baseURL,
     managementReadToken: opts?.managementReadToken,
     features: opts?.features,
@@ -774,11 +791,15 @@ export async function forceSyncOmniRouteModels(args: {
   }
 
   try {
-    const rawModels = await fetcher(auth.baseURL, auth.apiKey, 10_000);
+    const rawModels = await fetcher(auth.baseURL, auth.apiKey, resolved.fetchTimeoutMs);
     let rawCombos: OmniRouteRawCombo[] = [];
     if (wantCombos) {
       try {
-        rawCombos = await combosFetcher(auth.baseURL, auth.managementReadToken, 10_000);
+        rawCombos = await combosFetcher(
+          auth.baseURL,
+          auth.managementReadToken,
+          resolved.fetchTimeoutMs
+        );
       } catch (err) {
         console.warn("[omniroute-plugin] force sync: combos fetch failed", err);
       }
@@ -786,7 +807,11 @@ export async function forceSyncOmniRouteModels(args: {
     let rawAutoCombos: OmniRouteRawAutoCombo[] = [];
     if (wantAutoCombos) {
       try {
-        rawAutoCombos = await autoCombosFetcher(auth.baseURL, auth.managementReadToken, 5_000);
+        rawAutoCombos = await autoCombosFetcher(
+          auth.baseURL,
+          auth.managementReadToken,
+          resolved.fetchTimeoutMs
+        );
       } catch {
         /* soft-fail */
       }
@@ -794,7 +819,11 @@ export async function forceSyncOmniRouteModels(args: {
     let rawEnrichment: OmniRouteEnrichmentMap = new Map();
     if (wantEnrichment) {
       try {
-        rawEnrichment = await enrichmentFetcher(auth.baseURL, auth.managementReadToken, 10_000);
+        rawEnrichment = await enrichmentFetcher(
+          auth.baseURL,
+          auth.managementReadToken,
+          resolved.fetchTimeoutMs
+        );
       } catch {
         rawEnrichment = new Map();
       }
@@ -805,7 +834,7 @@ export async function forceSyncOmniRouteModels(args: {
         rawCompressionCombos = await compressionMetaFetcher(
           auth.baseURL,
           auth.managementReadToken,
-          10_000
+          resolved.fetchTimeoutMs
         );
       } catch {
         rawCompressionCombos = [];
@@ -814,7 +843,11 @@ export async function forceSyncOmniRouteModels(args: {
     let rawConnections: OmniRouteProviderConnection[] = [];
     if (wantUsableOnly) {
       try {
-        rawConnections = await providersFetcher(auth.baseURL, auth.managementReadToken, 10_000);
+        rawConnections = await providersFetcher(
+          auth.baseURL,
+          auth.managementReadToken,
+          resolved.fetchTimeoutMs
+        );
       } catch {
         rawConnections = [];
       }
@@ -2915,10 +2948,7 @@ export function passesModelAllowlist(
  * filter is set, all combos pass. Combos with zero resolvable members pass
  * (mirrors `isUsableCombo` semantics).
  */
-export function passesComboAllowlist(
-  combo: OmniRouteRawCombo,
-  visible?: ModelListFilter
-): boolean {
+export function passesComboAllowlist(combo: OmniRouteRawCombo, visible?: ModelListFilter): boolean {
   if (!visible) return true;
   const steps = Array.isArray(combo.models) ? combo.models : [];
   if (steps.length === 0) return true;
@@ -5318,7 +5348,8 @@ export function createOmniRouteConfigHook(
           warmSnapshot = snapshotResult;
           // Log snapshot age (accept any age — instant beats empty).
           const age = (snapshotResult as { writtenAt?: number }).writtenAt;
-          const ageLabel = typeof age === "number" ? `${Math.round((Date.now() - age) / 3_600_000)}h` : "unknown";
+          const ageLabel =
+            typeof age === "number" ? `${Math.round((Date.now() - age) / 3_600_000)}h` : "unknown";
           logger.warn(
             `[omniroute-plugin] config shim: warm startup from disk snapshot (${snapshotResult.rawModels.length} models, age ${ageLabel})`
           );
@@ -5390,7 +5421,11 @@ export function createOmniRouteConfigHook(
         const doCompression = async (): Promise<void> => {
           if (!wantCompressionMeta) return;
           try {
-            localRawCompressionCombos = await compressionMetaFetcher(baseURL, managementReadToken, 10_000);
+            localRawCompressionCombos = await compressionMetaFetcher(
+              baseURL,
+              managementReadToken,
+              10_000
+            );
           } catch (err) {
             logger.warn(
               "[omniroute-plugin] config shim: /api/context/combos fetch failed; publishing combos without compression suffix",
