@@ -961,9 +961,16 @@ async function getProviderSearchPool(provider: string): Promise<string[]> {
       if (
         nodePrefix === provider ||
         nodePrefix === canonicalProvider ||
-        nodePrefix === canonicalAlias
+        nodePrefix === canonicalAlias ||
+        nodeId === provider ||
+        nodeId === canonicalProvider ||
+        nodeId === canonicalAlias
       ) {
         searchPool.add(nodeId);
+        searchPool.add(nodePrefix);
+        if (typeof nodeRecord.type === "string" && nodeRecord.type.trim()) {
+          searchPool.add(nodeRecord.type.trim());
+        }
       }
     }
   } catch {

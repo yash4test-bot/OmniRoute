@@ -61,6 +61,8 @@ export interface UseModelVisibilityHandlersParams {
   selectedConnection: any;
   /** The provider node (may be null). */
   providerNode: any;
+  /** Optional callback to set the active playground model when testing a model. */
+  onSelectPlaygroundModel?: (modelId: string) => void;
 }
 
 export interface UseModelVisibilityHandlersReturn {
@@ -107,6 +109,7 @@ export function useModelVisibilityHandlers({
   t,
   selectedConnection,
   providerNode,
+  onSelectPlaygroundModel,
 }: UseModelVisibilityHandlersParams): UseModelVisibilityHandlersReturn {
   const [compatSavingModelId, setCompatSavingModelId] = useState<string | null>(null);
   const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
@@ -116,7 +119,9 @@ export function useModelVisibilityHandlers({
   const [clearingModels, setClearingModels] = useState(false);
   const [modelFilter, setModelFilter] = useState("");
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
-  const [modelTestStatus, setModelTestStatus] = useState<Record<string, "ok" | "error" | "quota">>({});
+  const [modelTestStatus, setModelTestStatus] = useState<Record<string, "ok" | "error" | "quota">>(
+    {}
+  );
   const [testingAll, setTestingAll] = useState(false);
   const [testProgress, setTestProgress] = useState<{ done: number; total: number } | null>(null);
   const [autoHideFailed, setAutoHideFailed] = useState(false);
@@ -286,6 +291,7 @@ export function useModelVisibilityHandlers({
   };
 
   const onTestModel = async (modelId: string, fullModel: string) => {
+    onSelectPlaygroundModel?.(modelId || fullModel);
     setTestingModelId(modelId);
     setModelTestStatus((prev) => ({ ...prev, [modelId]: undefined as any }));
     try {

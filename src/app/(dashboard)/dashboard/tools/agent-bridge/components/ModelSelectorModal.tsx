@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { matchesSearch } from "@/shared/utils/turkishText";
+import { MODELS_UPDATED_EVENT } from "@/shared/utils/modelCatalogEvents";
 
 interface ProviderModel {
   id: string;
@@ -47,6 +48,15 @@ export function ModelSelectorModal({
   useEffect(() => {
     if (!open) return;
     loadModels();
+
+    const handleModelsUpdated = () => {
+      loadModels();
+    };
+
+    window.addEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    return () => {
+      window.removeEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    };
   }, [open, loadModels]);
 
   useEffect(() => {

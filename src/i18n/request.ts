@@ -41,7 +41,10 @@ export function deepMergeFallback(
       typeof targetValue === "object" &&
       !Array.isArray(targetValue)
     ) {
-      deepMergeFallback(targetValue as Record<string, unknown>, sourceValue as Record<string, unknown>);
+      deepMergeFallback(
+        targetValue as Record<string, unknown>,
+        sourceValue as Record<string, unknown>
+      );
     } else if (targetValue === undefined || isUntranslatedPlaceholder(targetValue)) {
       target[key] = sourceValue;
     }
@@ -55,7 +58,12 @@ function setNestedValue(target: Record<string, unknown>, dottedKey: string, valu
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
-    if (!segment || segment === "__proto__" || segment === "constructor" || segment === "prototype") {
+    if (
+      !segment ||
+      segment === "__proto__" ||
+      segment === "constructor" ||
+      segment === "prototype"
+    ) {
       return;
     }
 
@@ -79,9 +87,14 @@ function setNestedValue(target: Record<string, unknown>, dottedKey: string, valu
 export function normalizeComplianceEventTypes(
   messages: Record<string, unknown>
 ): Record<string, unknown> {
+  if (!messages || typeof messages !== "object") return messages;
+
+  const result: Record<string, unknown> = { ...messages };
+
+  // 1. Normalize compliance.eventTypes dotted keys
   const compliance =
-    messages.compliance && typeof messages.compliance === "object" && !Array.isArray(messages.compliance)
-      ? (messages.compliance as Record<string, unknown>)
+    result.compliance && typeof result.compliance === "object" && !Array.isArray(result.compliance)
+      ? (result.compliance as Record<string, unknown>)
       : null;
   const eventTypes =
     compliance?.eventTypes &&
@@ -90,24 +103,76 @@ export function normalizeComplianceEventTypes(
       ? (compliance.eventTypes as Record<string, unknown>)
       : null;
 
-  if (!compliance || !eventTypes) return messages;
+  if (compliance && eventTypes) {
+    const normalizedEventTypes: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(eventTypes)) {
+      if (key.includes(".")) {
+        setNestedValue(normalizedEventTypes, key, value);
+      } else {
+        normalizedEventTypes[key] = value;
+      }
+    }
+    result.compliance = {
+      ...compliance,
+      eventTypes: normalizedEventTypes,
+    };
+  }
 
-  const normalizedEventTypes: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(eventTypes)) {
-    if (key.includes(".")) {
-      setNestedValue(normalizedEventTypes, key, value);
-    } else {
-      normalizedEventTypes[key] = value;
+  // 2. Normalize resilienceConnections "degraded.source.*" keys into "degradedSources"
+  const resilienceConnections =
+    result.resilienceConnections &&
+    typeof result.resilienceConnections === "object" &&
+    !Array.isArray(result.resilienceConnections)
+      ? { ...(result.resilienceConnections as Record<string, unknown>) }
+      : null;
+
+  if (resilienceConnections) {
+    const degradedSources: Record<string, unknown> =
+      resilienceConnections.degradedSources &&
+      typeof resilienceConnections.degradedSources === "object" &&
+      !Array.isArray(resilienceConnections.degradedSources)
+        ? { ...(resilienceConnections.degradedSources as Record<string, unknown>) }
+        : {};
+
+    let modified = false;
+    for (const [key, value] of Object.entries(resilienceConnections)) {
+      if (key.startsWith("degraded.source.")) {
+        const subKey = key.slice("degraded.source.".length);
+        degradedSources[subKey] = value;
+        delete resilienceConnections[key];
+        modified = true;
+      }
+    }
+
+    if (modified || Object.keys(degradedSources).length > 0) {
+      resilienceConnections.degradedSources = degradedSources;
+      result.resilienceConnections = resilienceConnections;
     }
   }
 
-  return {
-    ...messages,
-    compliance: {
-      ...compliance,
-      eventTypes: normalizedEventTypes,
-    },
-  };
+  // 3. Normalize top-level "capabilityFilter.*" keys into "capabilityFilter" object
+  const capabilityFilter: Record<string, unknown> =
+    result.capabilityFilter &&
+    typeof result.capabilityFilter === "object" &&
+    !Array.isArray(result.capabilityFilter)
+      ? { ...(result.capabilityFilter as Record<string, unknown>) }
+      : {};
+
+  let capModified = false;
+  for (const [key, value] of Object.entries(result)) {
+    if (key.startsWith("capabilityFilter.")) {
+      const subKey = key.slice("capabilityFilter.".length);
+      capabilityFilter[subKey] = value;
+      delete result[key];
+      capModified = true;
+    }
+  }
+
+  if (capModified || Object.keys(capabilityFilter).length > 0) {
+    result.capabilityFilter = capabilityFilter;
+  }
+
+  return result;
 }
 
 export default getRequestConfig(async () => {

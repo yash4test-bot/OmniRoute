@@ -10,11 +10,23 @@ import ProviderParamFilterSection from "./ProviderParamFilterSection";
 import ProviderInterceptionSection from "./ProviderInterceptionSection";
 import ProviderCcAliasSection from "./ProviderCcAliasSection";
 
-export default function ProviderExtraPanels({ providerId }: { providerId: string }) {
+export default function ProviderExtraPanels({
+  providerId,
+  selectedModel,
+  onModelChange,
+}: {
+  providerId: string;
+  selectedModel?: string;
+  onModelChange?: (model: string) => void;
+}) {
   return (
     <>
       {/* Playground panel — rendered for providers that declare serviceKinds */}
-      <ProviderPlaygroundPanel providerId={providerId} />
+      <ProviderPlaygroundPanel
+        providerId={providerId}
+        selectedModel={selectedModel}
+        onModelChange={onModelChange}
+      />
 
       {/* Param filters — denylist/allowlist config per provider/model (#6625) */}
       <ProviderParamFilterSection providerId={providerId} />

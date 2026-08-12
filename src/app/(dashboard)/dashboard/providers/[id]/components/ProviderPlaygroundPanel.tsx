@@ -30,10 +30,17 @@ export const MEDIA_SERVICE_KINDS: ServiceKind[] = [
   "music",
 ];
 
-export function renderKindPanel(kind: ServiceKind, providerId: string): JSX.Element | null {
+export function renderKindPanel(
+  kind: ServiceKind,
+  providerId: string,
+  selectedModel?: string,
+  onModelChange?: (model: string) => void
+): JSX.Element | null {
   switch (kind) {
     case "llm":
-      return <LlmChatCard providerId={providerId} />;
+      return (
+        <LlmChatCard providerId={providerId} model={selectedModel} onModelChange={onModelChange} />
+      );
     case "embedding":
       return <EmbeddingExampleCard providerId={providerId} />;
     case "image":
@@ -55,13 +62,20 @@ export function renderKindPanel(kind: ServiceKind, providerId: string): JSX.Elem
   }
 }
 
-export default function ProviderPlaygroundPanel({ providerId }: { providerId: string }) {
+export default function ProviderPlaygroundPanel({
+  providerId,
+  selectedModel,
+  onModelChange,
+}: {
+  providerId: string;
+  selectedModel?: string;
+  onModelChange?: (model: string) => void;
+}) {
   // Resolve serviceKinds from AI_PROVIDERS.
   // For providers without explicit serviceKinds (most LLM providers), we infer
   // "llm" as the default.
   const providerEntry = AI_PROVIDERS[providerId as keyof typeof AI_PROVIDERS] as
-    | (Record<string, unknown> & { serviceKinds?: string[] })
-    | undefined;
+    (Record<string, unknown> & { serviceKinds?: string[] }) | undefined;
 
   const rawKinds: string[] = providerEntry?.serviceKinds ?? [];
 
@@ -99,7 +113,7 @@ export default function ProviderPlaygroundPanel({ providerId }: { providerId: st
         activeKind={activeKind}
         onSelect={setActiveKind}
       />
-      {renderKindPanel(activeKind, providerId)}
+      {renderKindPanel(activeKind, providerId, selectedModel, onModelChange)}
     </div>
   );
 }

@@ -433,6 +433,8 @@ export default function ProviderDetailPageClient() {
     [providerId, modelMeta.customModels]
   );
 
+  const [playgroundModel, setPlaygroundModel] = useState<string>("");
+
   // ── Phase 1l: model visibility handlers ─────────────────────────────────
   const {
     compatSavingModelId,
@@ -468,6 +470,7 @@ export default function ProviderDetailPageClient() {
     t,
     selectedConnection,
     providerNode,
+    onSelectPlaygroundModel: setPlaygroundModel,
   });
 
   if (loading) {
@@ -767,7 +770,11 @@ export default function ProviderDetailPageClient() {
       {isSearchProvider && <SearchProviderCard providerId={providerId} t={t} />}
 
       {/* Playground + param filters — extracted to components/ProviderExtraPanels.tsx (#6649) */}
-      <ProviderExtraPanels providerId={providerId} />
+      <ProviderExtraPanels
+        providerId={providerId}
+        selectedModel={playgroundModel}
+        onModelChange={setPlaygroundModel}
+      />
 
       <ProviderModalsPanel
         providerId={providerId}

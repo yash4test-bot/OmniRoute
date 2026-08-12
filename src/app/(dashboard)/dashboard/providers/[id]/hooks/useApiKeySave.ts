@@ -13,6 +13,7 @@
 import { useCallback } from "react";
 import type React from "react";
 import { providerUsesCuratedModelsOnly } from "@/lib/providers/modelListingCapability";
+import { notifyModelsUpdated } from "@/shared/utils/modelCatalogEvents";
 import type { ProviderMessageTranslator } from "../providerPageHelpers";
 import type { ImportProgress } from "./useModelImportHandlers";
 
@@ -54,6 +55,7 @@ export function useApiKeySave({
           const connectionData = await res.json();
           const newConnection = connectionData?.connection;
           await fetchConnections();
+          notifyModelsUpdated();
           setShowAddApiKeyModal(false);
           setSiliconFlowInitialBaseUrl(undefined);
 
