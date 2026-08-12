@@ -30,6 +30,7 @@ import { type BatchTestResults } from "../hooks/useProviderConnections";
 import { type ConnectionDeleteConfirmState } from "../hooks/useConnectionDeleteConfirm";
 import { type ImportProgress } from "../hooks/useModelImportHandlers";
 import { providerText, type ProviderMessageTranslator } from "../providerPageHelpers";
+import { resolveProviderOAuthBackendId } from "../../providerPageUtils";
 
 interface ProviderInfo {
   name: string;
@@ -228,6 +229,8 @@ export default function ProviderModalsPanel({
   setShowTutorialModal,
   t,
 }: ProviderModalsPanelProps) {
+  const oauthProviderId = resolveProviderOAuthBackendId(providerId, providerInfo);
+
   return (
     <>
       {showRiskNoticeModal && subscriptionRisk && (
@@ -288,7 +291,7 @@ export default function ProviderModalsPanel({
           <OAuthModal
             isOpen={showOAuthModal}
             reauthConnection={reauthConnection}
-            provider={providerId}
+            provider={oauthProviderId}
             providerInfo={providerInfo}
             onSuccess={handleOAuthSuccess}
             onClose={() => setShowOAuthModal(false)}
