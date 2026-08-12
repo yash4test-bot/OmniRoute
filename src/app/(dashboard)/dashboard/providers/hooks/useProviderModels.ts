@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { MODELS_UPDATED_EVENT } from "@/shared/utils/modelCatalogEvents";
 
 export interface ProviderModel {
   id: string;
@@ -126,6 +126,17 @@ export function useProviderModels(providerId: string): UseProviderModelsResult {
       return;
     }
     return load();
+  }, [providerId, load]);
+
+  useEffect(() => {
+    if (!providerId) return;
+    const handleModelsUpdated = () => {
+      load();
+    };
+    window.addEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    return () => {
+      window.removeEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    };
   }, [providerId, load]);
 
   // Release the current in-flight cleanup on unmount so no state updates leak.

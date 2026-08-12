@@ -6,6 +6,7 @@ import {
   useRef,
   useCallback,
   useImperativeHandle,
+  useMemo,
   type RefObject,
 } from "react";
 import { useTranslations } from "next-intl";
@@ -183,6 +184,13 @@ export function LlmChatCard({
   // also covers vendor-namespaced ids (e.g. `moonshotai/kimi-k2.6`) that already
   // contain a slash but still need the provider prefix (#3050).
   const qualifiedModel = qualifyPlaygroundModel(effectiveModel, routingPrefix);
+
+  // Auto-select first model when models load if no model is selected
+  useEffect(() => {
+    if (!model && models.length > 0 && models[0]?.id) {
+      setModel(models[0].id);
+    }
+  }, [model, models, setModel]);
 
   // Autofocus textarea in embedded mode
   useEffect(() => {
@@ -386,7 +394,25 @@ export function LlmChatCard({
     });
   }, [onControlsChange, handleClear, messages.length, streaming]);
 
-  const modelOptions = models.length > 0 ? models : initialModel ? [{ id: initialModel }] : [];
+  const modelOptions = useMemo(() => {
+    const list = models.length > 0 ? [...models] : initialModel ? [{ id: initialModel }] : [];
+    if (model) {
+      const unprefixed = model.includes("/") ? model.split("/").pop()! : model;
+      const exists = list.some((m) => m.id === model || m.id === unprefixed);
+      if (!exists) {
+        list.unshift({ id: model });
+      }
+    }
+    return list;
+  }, [models, initialModel, model]);
+
+  const selectValue = useMemo(() => {
+    if (!model) return firstModel;
+    if (modelOptions.some((m) => m.id === model)) return model;
+    const unprefixed = model.includes("/") ? model.split("/").pop()! : model;
+    if (modelOptions.some((m) => m.id === unprefixed)) return unprefixed;
+    return model;
+  }, [model, firstModel, modelOptions]);
 
   return (
     <div
@@ -402,12 +428,14 @@ export function LlmChatCard({
           <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <label className="text-xs text-text-muted shrink-0">{t("model")}:</label>
             <select
-              value={model || firstModel}
+              value={selectValue}
               onChange={(e) => setModel(e.target.value)}
               disabled={loading}
               className="min-w-0 flex-1 rounded-md border border-border bg-bg-subtle text-xs px-2 py-1 text-text-main focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
             >
-              {modelOptions.length === 0 && !loading && <option value="">{initialModel || "—"}</option>}
+              {modelOptions.length === 0 && !loading && (
+                <option value="">{initialModel || "—"}</option>
+              )}
               {loading && <option value="">{t("loading") ?? "Loading…"}</option>}
               {modelOptions.map((m) => (
                 <option key={m.id} value={m.id}>

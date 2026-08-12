@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { compareTr } from "@/shared/utils/turkishText";
 import type { ModelReasoningCapabilities } from "@/app/(dashboard)/dashboard/playground/components/reasoningControlUtils";
+import { MODELS_UPDATED_EVENT } from "@/shared/utils/modelCatalogEvents";
 
 /**
  * Prefix-based format→model matching, used to pick a smart default
@@ -55,7 +56,9 @@ export function useAvailableModels(provider?: string) {
         const res = await fetch("/api/v1/models");
         const data = await res.json();
         const entries = data.data || [];
-        const models = entries.map((m) => m.id).sort((a, b) => compareTr(a, b));
+        const models = entries
+          .map((m: { id: string }) => m.id)
+          .sort((a: string, b: string) => compareTr(a, b));
         const caps: Record<string, ModelReasoningCapabilities> = {};
         for (const entry of entries) {
           if (entry && typeof entry.id === "string" && entry.capabilities) {
@@ -72,6 +75,15 @@ export function useAvailableModels(provider?: string) {
       }
     };
     fetchModels();
+
+    const handleModelsUpdated = () => {
+      fetchModels();
+    };
+
+    window.addEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    return () => {
+      window.removeEventListener(MODELS_UPDATED_EVENT, handleModelsUpdated);
+    };
   }, []);
 
   const availableModels = useMemo(

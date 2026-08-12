@@ -119,4 +119,41 @@ describe("useModelVisibilityHandlers", () => {
     ).toBe(false);
     expect(hook.get().modelTestStatus["claude-opus-4-8"]).toBe("error");
   });
+
+  it("calls onSelectPlaygroundModel when onTestModel is invoked", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ status: "ok", latencyMs: 120 }),
+    } as Response);
+
+    const onSelectPlaygroundModel = vi.fn();
+
+    let latestResult: HookResult | null = null;
+    function CustomWrapper() {
+      const result = useModelVisibilityHandlers({
+        ...baseProps,
+        onSelectPlaygroundModel,
+      });
+      React.useEffect(() => {
+        latestResult = result;
+      });
+      return null;
+    }
+
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const root = createRoot(el);
+
+    act(() => {
+      root.render(<CustomWrapper />);
+    });
+    roots.push({ root, el });
+
+    await act(async () => {
+      await latestResult?.onTestModel("gpt-5.5-thinking", "cgpt-web/gpt-5.5-thinking");
+    });
+
+    expect(onSelectPlaygroundModel).toHaveBeenCalledWith("gpt-5.5-thinking");
+  });
 });

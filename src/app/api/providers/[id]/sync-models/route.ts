@@ -20,6 +20,7 @@ import { providerUsesCuratedModelsOnly } from "@/lib/providers/modelListingCapab
 import { GET as getProviderModels } from "../models/route";
 import { isDegradedLocalCatalog } from "./degradedLocalCatalog";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
+import { invalidateModelCatalogCache } from "@/lib/db/readCache";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -603,6 +604,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         },
       });
     }
+
+    invalidateModelCatalogCache();
 
     return NextResponse.json({
       ok: true,
