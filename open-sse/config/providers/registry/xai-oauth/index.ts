@@ -18,7 +18,12 @@ export const xai_oauthProvider: RegistryEntry = {
     tokenUrl: "https://auth.x.ai/oauth2/token",
   },
   models: [
-    { id: "grok-4.5", name: "Grok 4.5", contextLength: 500000 },
+    {
+      id: "grok-4.5",
+      name: "Grok 4.5",
+      contextLength: 500000,
+      targetFormat: "openai-responses",
+    },
     ...(xaiProvider.models || []),
   ],
 };
