@@ -267,7 +267,7 @@ export function invalidateModelCatalogCache(): void {
 
 /**
  * Invalidate caches (call after writes to any of: settings, pricing,
- * connections, combos, nodes).
+ * connections, combos, nodes, model capability/context metadata).
  *
  * When scope is `"connections"` and an `id` is provided, only that
  * connection's by-ID cache entry is invalidated (the filter-keyed raw
@@ -294,5 +294,5 @@ export function invalidateDbCache(
   // Settings/connections/combos all feed the unified model catalog builder
   // (blockedProviders + hidePaidModels, provider connections + excludedModels,
   // combo definitions, respectively) — pricing does too, via isFreeModel().
-  modelCatalogCacheVersion++;
+  invalidateModelCatalogCache();
 }

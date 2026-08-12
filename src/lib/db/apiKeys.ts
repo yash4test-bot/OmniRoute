@@ -46,7 +46,10 @@ import {
   parseNullableTimestamp,
   parseIsBanned,
   parseStreamDefaultMode,
+  parseCacheDefaultMode,
   parseChaosModeEnabled,
+  parseCompressionEnabled,
+  parseModelAccessMode,
 } from "./apiKeys/rowParsers";
 import {
   clearModelPermissionCache,
@@ -54,6 +57,11 @@ import {
   setCachedModelPermission,
   evictModelPermissionCache,
 } from "./apiKeys/modelPermissionCache";
+import type { ModelAccessMode } from "./apiKeys/modelAccessMode";
+import {
+  normalizeApiKeyPermissionsUpdate,
+  type ApiKeyPermissionsUpdate,
+} from "./apiKeys/permissionsUpdate";
 import { getModelCatalogCacheVersion, invalidateModelCatalogCache } from "./readCache";
 import type { AccessSchedule, RateLimitRule } from "./apiKeys/types";
 
@@ -75,6 +83,7 @@ interface ApiKeyMetadata {
   id: string;
   name: string;
   machineId: string | null;
+  modelAccessMode: ModelAccessMode;
   allowedModels: string[];
   blockedModels: string[];
   allowedCombos: string[];
@@ -98,12 +107,14 @@ interface ApiKeyMetadata {
   proxyId: string | null;
   allowedEndpoints: string[];
   streamDefaultMode: "legacy" | "json";
+  cacheDefaultMode: "legacy" | "bypass";
   disableNonPublicModels: boolean;
   allowUsageCommand: boolean;
   usageLimitEnabled: boolean;
   dailyUsageLimitUsd: number | null;
   weeklyUsageLimitUsd: number | null;
   chaosModeEnabled: boolean;
+  compressionEnabled: boolean;
 }
 
 interface ApiKeyRow extends JsonRecord {
@@ -114,6 +125,8 @@ interface ApiKeyRow extends JsonRecord {
   machineId?: unknown;
   allowed_models?: unknown;
   allowedModels?: unknown;
+  model_access_mode?: unknown;
+  modelAccessMode?: unknown;
   blocked_models?: unknown;
   blockedModels?: unknown;
   allowed_combos?: unknown;
@@ -135,6 +148,8 @@ interface ApiKeyRow extends JsonRecord {
   proxy_id?: unknown;
   stream_default_mode?: unknown;
   streamDefaultMode?: unknown;
+  cache_default_mode?: unknown;
+  cacheDefaultMode?: unknown;
   allow_usage_command?: unknown;
   allowUsageCommand?: unknown;
   usage_limit_enabled?: unknown;
@@ -145,6 +160,8 @@ interface ApiKeyRow extends JsonRecord {
   weeklyUsageLimitUsd?: unknown;
   chaos_mode_enabled?: unknown;
   chaosModeEnabled?: unknown;
+  compression_enabled?: unknown;
+  compressionEnabled?: unknown;
 }
 
 interface StatementLike<TRow = unknown> {
@@ -169,6 +186,7 @@ interface ApiKeysStatements {
 
 interface ApiKeyView extends JsonRecord {
   id?: string;
+  modelAccessMode: ModelAccessMode;
   allowedModels: string[];
   blockedModels: string[];
   allowedCombos: string[];
@@ -186,12 +204,14 @@ interface ApiKeyView extends JsonRecord {
   expiresAt?: string | null;
   allowedEndpoints: string[];
   streamDefaultMode: "legacy" | "json";
+  cacheDefaultMode: "legacy" | "bypass";
   disableNonPublicModels?: boolean;
   allowUsageCommand?: boolean;
   usageLimitEnabled?: boolean;
   dailyUsageLimitUsd?: number | null;
   weeklyUsageLimitUsd?: number | null;
   chaosModeEnabled?: boolean;
+  compressionEnabled: boolean;
 }
 
 // LRU cache for API key validation (valid keys only)
@@ -399,7 +419,7 @@ function getPreparedStatements(db: ApiKeysDbLike): ApiKeysStatements {
       "SELECT id, expires_at, revoked_at, is_active, is_banned FROM api_keys WHERE key = ? OR key_hash = ?",
     );
     _stmtGetKeyMetadata = db.prepare<ApiKeyRow>(
-      "SELECT id, name, machine_id, allowed_models, blocked_models, allowed_combos, allowed_connections, allowed_quotas, no_log, auto_resolve, is_active, access_schedule, max_requests_per_day, max_requests_per_minute, throttle_delay_ms, max_sessions, revoked_at, expires_at, ip_allowlist, scopes, rate_limits, is_banned, key_hash, allowed_endpoints, stream_default_mode, disable_non_public_models, allow_usage_command, usage_limit_enabled, daily_usage_limit_usd, weekly_usage_limit_usd, chaos_mode_enabled, proxy_id FROM api_keys WHERE key = ? OR key_hash = ?",
+      "SELECT id, name, machine_id, model_access_mode, allowed_models, blocked_models, allowed_combos, allowed_connections, allowed_quotas, no_log, auto_resolve, is_active, access_schedule, max_requests_per_day, max_requests_per_minute, throttle_delay_ms, max_sessions, revoked_at, expires_at, ip_allowlist, scopes, rate_limits, is_banned, key_hash, allowed_endpoints, stream_default_mode, cache_default_mode, disable_non_public_models, allow_usage_command, usage_limit_enabled, daily_usage_limit_usd, weekly_usage_limit_usd, chaos_mode_enabled, compression_enabled, proxy_id FROM api_keys WHERE key = ? OR key_hash = ?",
     );
     _stmtInsertKey = db.prepare(
       "INSERT INTO api_keys (id, name, key, machine_id, allowed_models, no_log, created_at, key_prefix, key_hash, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -440,6 +460,10 @@ export async function getApiKeys(limit?: number, offset?: number) {
   }
   return rows.map((row) => {
     const camelRow = toRecord(rowToCamel(row)) as ApiKeyView;
+    camelRow.modelAccessMode = parseModelAccessMode(
+      camelRow.modelAccessMode,
+      camelRow.allowedModels
+    );
     camelRow.allowedModels = parseAllowedModels(camelRow.allowedModels);
     camelRow.blockedModels = parseAllowedModels(camelRow.blockedModels);
     camelRow.allowedCombos = parseAllowedCombos(camelRow.allowedCombos);
@@ -454,11 +478,15 @@ export async function getApiKeys(limit?: number, offset?: number) {
     camelRow.scopes = parseStringList((camelRow as JsonRecord).scopes);
     camelRow.allowedEndpoints = parseStringList((camelRow as JsonRecord).allowedEndpoints);
     camelRow.streamDefaultMode = parseStreamDefaultMode((camelRow as JsonRecord).streamDefaultMode);
+    camelRow.cacheDefaultMode = parseCacheDefaultMode((camelRow as JsonRecord).cacheDefaultMode);
     camelRow.disableNonPublicModels = parseDisableNonPublicModels(
       (camelRow as JsonRecord).disableNonPublicModels,
     );
     camelRow.allowUsageCommand = parseAllowUsageCommand((camelRow as JsonRecord).allowUsageCommand);
     camelRow.chaosModeEnabled = parseChaosModeEnabled((camelRow as JsonRecord).chaosModeEnabled);
+    camelRow.compressionEnabled = parseCompressionEnabled(
+      (camelRow as JsonRecord).compressionEnabled
+    );
     Object.assign(camelRow, parseApiKeyUsageLimitFields(camelRow));
     if (typeof camelRow.id === "string" && camelRow.id.length > 0) {
       setNoLog(camelRow.id, camelRow.noLog === true);
@@ -507,6 +535,7 @@ export async function pickApiKeyForInternalUse(
       revokedAt?: string | null;
       isBanned?: boolean;
       scopes?: string[];
+      modelAccessMode?: ModelAccessMode;
       allowedModels?: string[];
       lastUsedAt?: string | number | null;
     }>;
@@ -522,7 +551,11 @@ export async function pickApiKeyForInternalUse(
 
     // 2. Allow-all key (empty allowedModels means no model restrictions).
     const allowAllKey = keys.find(
-      (k) => isUsable(k) && Array.isArray(k.allowedModels) && k.allowedModels.length === 0,
+      (k) =>
+        isUsable(k) &&
+        k.modelAccessMode !== "restricted" &&
+        Array.isArray(k.allowedModels) &&
+        k.allowedModels.length === 0
     );
     if (allowAllKey?.key) return allowAllKey.key;
 
@@ -550,6 +583,7 @@ export async function getApiKeyById(id: string) {
   const row = stmt.getKeyById.get(id);
   if (!row) return null;
   const camelRow = toRecord(rowToCamel(row)) as ApiKeyView;
+  camelRow.modelAccessMode = parseModelAccessMode(camelRow.modelAccessMode, camelRow.allowedModels);
   camelRow.allowedModels = parseAllowedModels(camelRow.allowedModels);
   camelRow.blockedModels = parseAllowedModels(camelRow.blockedModels);
   camelRow.allowedCombos = parseAllowedCombos(camelRow.allowedCombos);
@@ -564,11 +598,15 @@ export async function getApiKeyById(id: string) {
   camelRow.scopes = parseStringList((camelRow as JsonRecord).scopes);
   camelRow.allowedEndpoints = parseStringList((camelRow as JsonRecord).allowedEndpoints);
   camelRow.streamDefaultMode = parseStreamDefaultMode((camelRow as JsonRecord).streamDefaultMode);
+  camelRow.cacheDefaultMode = parseCacheDefaultMode((camelRow as JsonRecord).cacheDefaultMode);
   camelRow.disableNonPublicModels = parseDisableNonPublicModels(
     (camelRow as JsonRecord).disableNonPublicModels,
   );
   camelRow.allowUsageCommand = parseAllowUsageCommand((camelRow as JsonRecord).allowUsageCommand);
   camelRow.chaosModeEnabled = parseChaosModeEnabled((camelRow as JsonRecord).chaosModeEnabled);
+  camelRow.compressionEnabled = parseCompressionEnabled(
+    (camelRow as JsonRecord).compressionEnabled
+  );
   Object.assign(camelRow, parseApiKeyUsageLimitFields(camelRow));
   if (typeof camelRow.id === "string" && camelRow.id.length > 0) {
     setNoLog(camelRow.id, camelRow.noLog === true);
@@ -602,6 +640,7 @@ export async function createApiKey(name: string, machineId: string, scopes: stri
     name: name,
     key: result.key,
     machineId: machineId,
+    modelAccessMode: "all" as const,
     allowedModels: [], // Empty array means all models allowed
     allowedCombos: [], // Empty array means no explicit combo restriction
     allowedConnections: [], // Empty array means all connections allowed
@@ -665,80 +704,24 @@ export async function regenerateApiKey(id: string) {
 
 export async function updateApiKeyPermissions(
   id: string,
-  update:
-    | string[]
-    | {
-        name?: string;
-        allowedModels?: string[];
-        blockedModels?: string[];
-        allowedCombos?: string[];
-        allowedConnections?: string[];
-        allowedQuotas?: string[];
-        noLog?: boolean;
-        autoResolve?: boolean;
-        isActive?: boolean;
-        accessSchedule?: AccessSchedule | null;
-        maxRequestsPerDay?: number | null;
-        maxRequestsPerMinute?: number | null;
-        throttleDelayMs?: number | null;
-        rateLimits?: RateLimitRule[] | null;
-        isBanned?: boolean;
-        expiresAt?: string | null;
-        // T08: max concurrent sessions for this key (0 = unlimited)
-        maxSessions?: number | null;
-        scopes?: string[] | null;
-        proxyId?: string | null;
-        allowedEndpoints?: string[] | null;
-        streamDefaultMode?: "legacy" | "json" | null;
-        disableNonPublicModels?: boolean;
-        allowUsageCommand?: boolean;
-        usageLimitEnabled?: boolean;
-        dailyUsageLimitUsd?: number | null;
-        weeklyUsageLimitUsd?: number | null;
-        chaosModeEnabled?: boolean;
-      },
+  update: string[] | ApiKeyPermissionsUpdate,
 ) {
   const db = getDbInstance() as ApiKeysDbLike;
   getPreparedStatements(db);
 
-  const normalized =
-    Array.isArray(update) || update === undefined
-      ? { allowedModels: update || [] }
-      : {
-          name: update.name,
-          allowedModels: update.allowedModels,
-          blockedModels: update.blockedModels,
-          allowedCombos: update.allowedCombos,
-          allowedConnections: update.allowedConnections,
-          allowedQuotas: (update as { allowedQuotas?: string[] }).allowedQuotas,
-          noLog: update.noLog,
-          autoResolve: update.autoResolve,
-          isActive: update.isActive,
-          accessSchedule: update.accessSchedule,
-          maxRequestsPerDay: update.maxRequestsPerDay,
-          maxRequestsPerMinute: update.maxRequestsPerMinute,
-          throttleDelayMs: update.throttleDelayMs,
-          rateLimits: update.rateLimits,
-          isBanned: update.isBanned,
-          expiresAt: update.expiresAt,
-          maxSessions: (update as { maxSessions?: number | null }).maxSessions,
-          scopes: (update as { scopes?: string[] | null }).scopes,
-          proxyId: (update as { proxyId?: string | null }).proxyId,
-          allowedEndpoints: (update as { allowedEndpoints?: string[] | null }).allowedEndpoints,
-          streamDefaultMode: (update as { streamDefaultMode?: "legacy" | "json" | null })
-            .streamDefaultMode,
-          disableNonPublicModels: (update as { disableNonPublicModels?: boolean })
-            .disableNonPublicModels,
-          allowUsageCommand: (update as { allowUsageCommand?: boolean }).allowUsageCommand,
-          usageLimitEnabled: (update as { usageLimitEnabled?: boolean }).usageLimitEnabled,
-          dailyUsageLimitUsd: (update as { dailyUsageLimitUsd?: number | null }).dailyUsageLimitUsd,
-          weeklyUsageLimitUsd: (update as { weeklyUsageLimitUsd?: number | null })
-            .weeklyUsageLimitUsd,
-          chaosModeEnabled: (update as { chaosModeEnabled?: boolean }).chaosModeEnabled,
-        };
+  const normalized = normalizeApiKeyPermissionsUpdate(update);
+  const shouldInvalidateModelCatalog =
+    normalized.modelAccessMode !== undefined ||
+    normalized.allowedModels !== undefined ||
+    normalized.blockedModels !== undefined ||
+    normalized.allowedCombos !== undefined ||
+    normalized.allowedConnections !== undefined ||
+    normalized.allowedQuotas !== undefined ||
+    normalized.disableNonPublicModels !== undefined;
 
   if (
     normalized.name === undefined &&
+    normalized.modelAccessMode === undefined &&
     normalized.allowedModels === undefined &&
     normalized.blockedModels === undefined &&
     normalized.allowedCombos === undefined &&
@@ -759,9 +742,11 @@ export async function updateApiKeyPermissions(
     (normalized as Record<string, unknown>).proxyId === undefined &&
     (normalized as Record<string, unknown>).allowedEndpoints === undefined &&
     (normalized as Record<string, unknown>).streamDefaultMode === undefined &&
+    (normalized as Record<string, unknown>).cacheDefaultMode === undefined &&
     normalized.disableNonPublicModels === undefined &&
     normalized.allowUsageCommand === undefined &&
     normalized.chaosModeEnabled === undefined &&
+    normalized.compressionEnabled === undefined &&
     !hasUsageLimitUpdate(normalized as Record<string, unknown>)
   ) {
     return false;
@@ -771,6 +756,7 @@ export async function updateApiKeyPermissions(
   const params: {
     id: string;
     name?: string;
+    modelAccessMode?: ModelAccessMode;
     allowedModels?: string;
     blockedModels?: string;
     allowedCombos?: string;
@@ -790,12 +776,14 @@ export async function updateApiKeyPermissions(
     scopes?: string;
     proxyId?: string | null;
     streamDefaultMode?: "legacy" | "json";
+    cacheDefaultMode?: "legacy" | "bypass";
     disableNonPublicModels?: number;
     allowUsageCommand?: number;
     usageLimitEnabled?: number;
     dailyUsageLimitUsd?: number | null;
     weeklyUsageLimitUsd?: number | null;
     chaosModeEnabled?: number;
+    compressionEnabled?: number;
   } = { id };
 
   if (normalized.name !== undefined) {
@@ -803,10 +791,13 @@ export async function updateApiKeyPermissions(
     params.name = normalized.name;
   }
 
+  if (normalized.modelAccessMode !== undefined) {
+    updates.push("model_access_mode = @modelAccessMode");
+    params.modelAccessMode = normalized.modelAccessMode;
+  }
   if (normalized.allowedModels !== undefined) {
-    // Empty array means all models are allowed
     updates.push("allowed_models = @allowedModels");
-    params.allowedModels = JSON.stringify(normalized.allowedModels || []);
+    params.allowedModels = JSON.stringify(normalized.allowedModels);
   }
 
   if (normalized.blockedModels !== undefined) {
@@ -904,6 +895,11 @@ export async function updateApiKeyPermissions(
     params.chaosModeEnabled = normalized.chaosModeEnabled ? 1 : 0;
   }
 
+  if (normalized.compressionEnabled !== undefined) {
+    updates.push("compression_enabled = @compressionEnabled");
+    params.compressionEnabled = normalized.compressionEnabled ? 1 : 0;
+  }
+
   appendUsageLimitUpdates(normalized as Record<string, unknown>, updates, params);
 
   const maxSessionsUpdate = (normalized as Record<string, unknown>).maxSessions;
@@ -932,6 +928,12 @@ export async function updateApiKeyPermissions(
   if (streamDefaultModeUpdate !== undefined) {
     updates.push("stream_default_mode = @streamDefaultMode");
     params.streamDefaultMode = parseStreamDefaultMode(streamDefaultModeUpdate);
+  }
+
+  const cacheDefaultModeUpdate = (normalized as Record<string, unknown>).cacheDefaultMode;
+  if (cacheDefaultModeUpdate !== undefined) {
+    updates.push("cache_default_mode = @cacheDefaultMode");
+    params.cacheDefaultMode = parseCacheDefaultMode(cacheDefaultModeUpdate);
   }
 
   const scopesUpdate = (normalized as Record<string, unknown>).scopes;
@@ -990,16 +992,6 @@ export async function updateApiKeyPermissions(
 
   if (changedRows === 0) return false;
 
-  const invalidatesModelCatalogCache =
-    normalized.allowedModels !== undefined ||
-    normalized.blockedModels !== undefined ||
-    allowedQuotasUpdate !== undefined ||
-    normalized.disableNonPublicModels !== undefined;
-
-  if (invalidatesModelCatalogCache) {
-    invalidateModelCatalogCache();
-  }
-
   const { logAuditEvent } = await import("@/lib/compliance");
 
   if (normalized.isBanned !== undefined) {
@@ -1052,8 +1044,9 @@ export async function updateApiKeyPermissions(
     setNoLog(id, normalized.noLog);
   }
 
-  // Invalidate caches since permissions changed
+  // Invalidate per-key policy and filtered model-catalog caches after the atomic write.
   invalidateCaches();
+  if (shouldInvalidateModelCatalog) invalidateModelCatalogCache();
 
   await deleteRedisAuthCacheForKeyId(db, id);
 
@@ -1273,6 +1266,7 @@ export async function getApiKeyMetadata(
       id: "env-key",
       name: "Environment Key",
       machineId: "server-env",
+      modelAccessMode: "all",
       allowedModels: [],
       blockedModels: [],
       allowedCombos: [],
@@ -1296,12 +1290,14 @@ export async function getApiKeyMetadata(
       proxyId: null,
       allowedEndpoints: [],
       streamDefaultMode: "legacy",
+      cacheDefaultMode: "legacy",
       disableNonPublicModels: false,
       allowUsageCommand: false,
       usageLimitEnabled: false,
       dailyUsageLimitUsd: null,
       weeklyUsageLimitUsd: null,
       chaosModeEnabled: false,
+      compressionEnabled: true,
     };
   }
 
@@ -1330,11 +1326,16 @@ export async function getApiKeyMetadata(
 
   const rawMaxSessions = record.max_sessions ?? record.maxSessions;
 
+  const rawAllowedModels = record.allowed_models ?? record.allowedModels;
   const metadata: ApiKeyMetadata = {
     id: metadataId,
     name: metadataName,
     machineId: metadataMachineId,
-    allowedModels: parseAllowedModels(record.allowed_models ?? record.allowedModels),
+    modelAccessMode: parseModelAccessMode(
+      record.model_access_mode ?? record.modelAccessMode,
+      rawAllowedModels
+    ),
+    allowedModels: parseAllowedModels(rawAllowedModels),
     blockedModels: parseAllowedModels(record.blocked_models ?? record.blockedModels),
     allowedCombos: parseAllowedCombos(record.allowed_combos ?? record.allowedCombos),
     allowedConnections: parseAllowedConnections(
@@ -1368,6 +1369,9 @@ export async function getApiKeyMetadata(
     streamDefaultMode: parseStreamDefaultMode(
       (record as JsonRecord).stream_default_mode ?? (record as JsonRecord).streamDefaultMode,
     ),
+    cacheDefaultMode: parseCacheDefaultMode(
+      (record as JsonRecord).cache_default_mode ?? (record as JsonRecord).cacheDefaultMode
+    ),
     disableNonPublicModels: parseDisableNonPublicModels(
       (record as JsonRecord).disable_non_public_models ??
         (record as JsonRecord).disableNonPublicModels,
@@ -1377,6 +1381,9 @@ export async function getApiKeyMetadata(
     ),
     chaosModeEnabled: parseChaosModeEnabled(
       (record as JsonRecord).chaos_mode_enabled ?? (record as JsonRecord).chaosModeEnabled,
+    ),
+    compressionEnabled: parseCompressionEnabled(
+      (record as JsonRecord).compression_enabled ?? (record as JsonRecord).compressionEnabled,
     ),
     ...parseApiKeyUsageLimitFields(record as JsonRecord),
   };
@@ -1425,7 +1432,7 @@ export async function isModelAllowedForKey(
   // SECURITY: Key not found in database = deny access (invalid/non-existent key)
   if (!metadata) return false;
 
-  const { allowedModels, blockedModels, disableNonPublicModels } = metadata;
+  const { modelAccessMode, allowedModels, blockedModels, disableNonPublicModels } = metadata;
   const modelPermissionCandidates = await getModelPermissionCandidates(modelId);
 
   // Deny-list patterns win over any allow-list entry. This lets operators keep
@@ -1460,6 +1467,10 @@ export async function isModelAllowedForKey(
     }
   }
 
+  // Only explicit allow-all permits an empty list; restricted + [] is deny-all.
+  if (!allowedModels || allowedModels.length === 0) {
+    return modelAccessMode !== "restricted";
+  }
   // Support exact match and prefix match (e.g., "openai/*" allows all OpenAI models)
   let allowed =
     !allowedModels ||

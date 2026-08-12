@@ -1,3 +1,4 @@
+import { extractRequestToolIdentityMap } from "./chatCore/requestToolIdentity.ts";
 import { injectMemoryAndSkills } from "./chatCore/memorySkillsInjection.ts";
 import { resolveChatCoreRequestSetup } from "./chatCore/requestSetup.ts";
 import { buildFailureUsageRecord } from "./chatCore/failureUsage.ts";
@@ -98,7 +99,7 @@ import { resolveAgentGoalPolicy } from "../utils/agentGoalPolicy.ts";
 import { createStreamController } from "../utils/streamHandler.ts";
 import * as streamFailure from "../utils/streamFailureFinalization.ts";
 import { createSseHeartbeatTransform, shapeForClientFormat } from "../utils/sseHeartbeat.ts";
-import { addBufferToUsage, filterUsageForFormat, estimateUsage } from "../utils/usageTracking.ts";
+import { addBufferToUsage, filterUsageForFormat, estimateUsage, sanitizeUsagePayloadForRequest } from "../utils/usageTracking.ts";
 import {
   refreshWithRetry,
   isUnrecoverableRefreshError,
@@ -199,6 +200,7 @@ import {
 import { wrapReadableStreamWithFinalize } from "./chatCore/streamFinalize.ts";
 import { buildCacheUsageLogMeta } from "./chatCore/cacheUsageMeta.ts";
 import { buildExecutorClientHeaders } from "./chatCore/executorClientHeaders.ts";
+import { getExecutionConnectionId } from "./chatCore/executionCredentials.ts";
 import { resolveExecutionCredentials as resolveExecutionCredentialsFor } from "./chatCore/executionCredentials.ts";
 import { resolveExecutorWithProxy as resolveExecutorWithProxyFor } from "./chatCore/executorProxy.ts";
 import type { ClaudeMessage } from "./chatCore/claudeMessageTypes.ts";
@@ -230,7 +232,8 @@ import {
   normalizeOpenAIToolFinishReasons,
   restoreNonStreamingToolNames,
 } from "./chatCore/passthroughToolNames.ts";
-import { resolveCompressionSettings } from "./chatCore/compressionSettings.ts";
+import { createDisabledCompressionConfig, resolveCompressionSettings } from "./chatCore/compressionSettings.ts";
+import type { EnforceDecision } from "@/lib/quota/types";
 import { isCompressionExcluded } from "../services/compression/exclusions.ts";
 import {
   isBuiltinStackedPipeline,
@@ -248,7 +251,10 @@ import { recordCompressionCacheStats } from "./chatCore/compressionCacheStats.ts
 import { writeCavemanOutputAnalytics } from "./chatCore/cavemanOutputAnalytics.ts";
 import { scheduleQuotaShareConsumption } from "./chatCore/quotaShareConsumption.ts";
 import { emitRequestGamificationEvent } from "./chatCore/gamificationEvent.ts";
-import { runPluginOnResponseHook } from "./chatCore/pluginOnResponse.ts";
+import {
+  runPluginOnResponseHook,
+  runPluginOnStreamCompleteHook,
+} from "./chatCore/pluginOnResponse.ts";
 import { scheduleStreamingQuotaShareConsumption } from "./chatCore/streamingQuotaShare.ts";
 import { recordStreamingUsageStats } from "./chatCore/streamingUsageStats.ts";
 import { recordStreamingCost } from "./chatCore/streamingCost.ts";
@@ -721,7 +727,10 @@ export async function handleChatCore({
   // wins; native Claude passthrough is left untouched (it carries its own `thinking`),
   // and non-thinking base models are cleaned up later by normalizeThinkingForModel().
   // Extracted to chatCore/claudeEffortVariant.ts (#3501); mutates body in place and returns the
-  // stripped model + an optional log line, keeping behaviour byte-identical.
+  // stripped model + an optional log line. The strip is unconditional (byte-identical to the
+  // original behavior) for the claude/Claude-Code-compatible lane; for any other provider it
+  // additionally requires isKnownClaudeEffortBaseModel(baseModel) to verify the base id is a
+  // real, effort-capable Claude model before stripping (vertex-claude-catalog-dispatch fix).
   {
     const effortVariant = applyClaudeEffortVariant({
       provider,
@@ -1060,6 +1069,8 @@ export async function handleChatCore({
     log,
     persistAttemptLogs,
     apiKeyId: apiKeyInfo?.id ?? undefined,
+    cacheDefaultMode: (apiKeyInfo as { cacheDefaultMode?: "legacy" | "bypass" } | null)
+      ?.cacheDefaultMode,
   });
   if (cacheHit) {
     return cacheHit;
@@ -1126,9 +1137,17 @@ export async function handleChatCore({
     const compressionExcluded =
       nativeCodexPassthrough ||
       isCompressionExcluded({ provider, model: effectiveModel }, compressionSettings?.exclusions);
-    let promptCompressionEnabled = compressionSettingsResult.enabled && !compressionExcluded;
+    // A per-key opt-out is a request-scoped hard kill for prompt compression. It
+    // deliberately does not disable the independent reactive context-fit safety
+    // passes, matching the existing x-omniroute-compression: off contract.
+    const apiKeyCompressionEnabled = apiKeyInfo?.compressionEnabled !== false;
+    let promptCompressionEnabled =
+      compressionSettingsResult.enabled && !compressionExcluded && apiKeyCompressionEnabled;
     reactiveContextCompactionEnabled = compressionSettingsResult.enabled && !compressionExcluded;
     contextEditingEnabled = compressionSettingsResult.contextEditingEnabled;
+    if (!apiKeyCompressionEnabled) {
+      log?.debug?.("COMPRESSION", "Prompt compression disabled for this API key");
+    }
     if (compressionExcluded) {
       void writeCompressionSkip(
         {
@@ -1170,15 +1189,10 @@ export async function handleChatCore({
         formatCompressionAnnotation,
       } = await import("../services/compression/strategySelector.ts");
       const { trackCompressionStats } = await import("../services/compression/stats.ts");
-      let config: CompressionConfig = compressionSettings ?? {
-        enabled: false,
-        defaultMode: "off",
-        autoTriggerTokens: 0,
-        cacheMinutes: 5,
-        preserveSystemPrompt: true,
-        comboOverrides: {},
-      };
-      if (compressionExcluded) config = { ...config, enabled: false };
+      let config: CompressionConfig = compressionSettings ?? createDisabledCompressionConfig();
+      if (compressionExcluded || !apiKeyCompressionEnabled) {
+        config = { ...config, enabled: false };
+      }
       if (!promptCompressionEnabled || !compressionSettings) {
         log?.debug?.("COMPRESSION", "Prompt compression disabled or unavailable");
       }
@@ -1779,7 +1793,7 @@ export async function handleChatCore({
     // engines (Caveman/RTK). Codex Desktop / Responses clients need this path even
     // when those engines are off, otherwise multi-turn image sessions hard-reject
     // at the budget check below (#8560).
-    if (reactiveContextCompactionEnabled && estimatedTokens > threshold) {
+    if (reactiveContextCompactionEnabled && !nativeCodexPassthrough && estimatedTokens > threshold) {
       log?.info?.(
         "CONTEXT",
         `Proactive compression triggered: ${estimatedTokens} tokens > ${threshold} threshold (${contextLimit} limit)`
@@ -1849,7 +1863,7 @@ export async function handleChatCore({
 
   // Last-resort compaction against the concrete input budget (not the 70% threshold).
   // Covers cases where the proactive pass was skipped or still left the request oversized (#8560).
-  if (reactiveContextCompactionEnabled && finalEstimatedInputTokens >= finalContextLimit && body) {
+  if (reactiveContextCompactionEnabled && !nativeCodexPassthrough && finalEstimatedInputTokens >= finalContextLimit && body) {
     const lastResortTarget = Math.max(1, finalContextLimit - toolsReserve - 1);
     const lastResortAdapter = adaptBodyForCompression(body as Record<string, unknown>);
     const lastResortResult = compressContext(lastResortAdapter.body, {
@@ -2264,20 +2278,7 @@ export async function handleChatCore({
   // the latter is a Kiro/Claude passthrough alias channel with string values,
   // while namespace identities carry `{namespace, name}` for the #7936 response
   // seam. Extract first because Kiro merge may reuse `_toolNameMap` below.
-  //
-  // #9780 — prefer the dedicated channel: on a pivot the openai->claude/gemini
-  // step publishes its own alias map on `_toolNameMap`, so that property alone
-  // yields aliases here. The `_toolNameMap` read stays as the fallback for the
-  // non-pivot producers (executors/base.ts, cliproxyapi.ts, antigravity).
-  const namespaceIdentityMap = translatedBody._namespaceToolIdentityMap;
-  const requestToolIdentityMap =
-    namespaceIdentityMap instanceof Map
-      ? namespaceIdentityMap
-      : translatedBody._toolNameMap instanceof Map
-        ? translatedBody._toolNameMap
-        : null;
-  delete translatedBody._namespaceToolIdentityMap;
-  delete translatedBody._toolNameMap;
+  const requestToolIdentityMap = extractRequestToolIdentityMap(translatedBody);
 
   // Kiro: sanitize tool schemas before dispatch. Kiro returns 400 "Improperly
   // formed request" for unsupported JSON-Schema keywords (anyOf/$ref/if-then,
@@ -2585,7 +2586,7 @@ export async function handleChatCore({
         // router/log use. Operators configure per-(key,model) caps against THIS id.
         model: model || undefined,
         estimatedCost: {},
-      }).catch((err: unknown) => {
+      }).catch((err: unknown): EnforceDecision => {
         log?.warn?.(
           "QUOTA_SHARE",
           `enforceQuotaShare failed; fail-open: ${err instanceof Error ? err.message : String(err)}`
@@ -2750,7 +2751,8 @@ export async function handleChatCore({
               stage: "sending_to_provider",
             });
             const execCreds = getExecutionCredentials();
-            const attemptConnectionId = execCreds?.connectionId || connectionId;
+            const executionConnectionId = getExecutionConnectionId(execCreds);
+            const attemptConnectionId = executionConnectionId || connectionId;
             const accountSemaphoreMaxConcurrency = resolveAccountSemaphoreMaxConcurrency(execCreds);
             const accountSemaphoreKey = resolveAccountSemaphoreKey({
               provider,
@@ -2834,7 +2836,7 @@ export async function handleChatCore({
                 stage: "provider_response_started",
               });
 
-              if (res.response.status === 401 && execCreds?.connectionId) {
+              if (res.response.status === 401 && executionConnectionId) {
                 recordKeyHealthStatus(401, execCreds);
               }
 
@@ -2866,7 +2868,7 @@ export async function handleChatCore({
                 attempts < maxAttempts - 1
               ) {
                 const failedConnectionId =
-                  execCreds?.connectionId || credentials?.connectionId || connectionId;
+                  executionConnectionId || credentials?.connectionId || connectionId;
                 const normalizedHeaders = normalizeHeaders(res.response.headers);
                 const retryAfterHeader = normalizedHeaders["retry-after"] ?? null;
                 const retryAfterMs = retryAfterHeader
@@ -4273,8 +4275,8 @@ export async function handleChatCore({
           }
         : responseBody
     );
+    sanitizeUsagePayloadForRequest(responseBody, finalBody || translatedBody || body, responsePayloadFormat);
     effectiveServiceTier = resolveReportedServiceTier(responseBody) ?? effectiveServiceTier;
-
     // Notify success - caller can clear error status if needed
     if (onRequestSuccess) {
       await onRequestSuccess();
@@ -4411,7 +4413,7 @@ export async function handleChatCore({
     // #8331: keep the client-visible metering fields real everywhere except Claude-Code-compatible
     // providers, where Claude Code's own context accounting relies on the buffered number — see
     // clientUsageBuffer.ts module docstring.
-    applyClientUsageBuffer(translatedResponse, body, clientResponseFormat, {
+    applyClientUsageBuffer(translatedResponse, finalBody || translatedBody || body, clientResponseFormat, {
       preserveContextBudgetInVisibleUsage: isClaudeCodeCompatible,
     });
 
@@ -4934,6 +4936,17 @@ export async function handleChatCore({
       apiKeyId: apiKeyInfo?.id ?? undefined,
       streamUsage,
       log,
+    });
+
+    // Plugin onStreamComplete hook — fire-and-forget, fail-open (#9571)
+    runPluginOnStreamCompleteHook({
+      status: normalizedStreamStatus,
+      usage: streamUsage as Record<string, unknown> | undefined,
+      ttft,
+      model,
+      provider,
+      errorCode: streamErrorCode,
+      startTime,
     });
   };
 

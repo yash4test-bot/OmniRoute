@@ -22,6 +22,7 @@ import { GrokWebExecutor } from "./grok-web.ts";
 import { GeminiWebExecutor } from "./gemini-web.ts";
 import { GeminiBusinessExecutor } from "./gemini-business.ts";
 import { ChatGptWebExecutor } from "./chatgpt-web.ts";
+import { ChatGptWebCodexExecutor } from "./chatgpt-web-codex.ts";
 import { BlackboxWebExecutor } from "./blackbox-web.ts";
 import { MuseSparkWebExecutor } from "./muse-spark-web.ts";
 import { AzureOpenAIExecutor } from "./azure-openai.ts";
@@ -73,6 +74,7 @@ import { TinyCmsExecutor } from "./tinycms.ts";
 import { HyperAgentExecutor } from "./hyperagent.ts";
 import { XaiExecutor } from "./xai.ts";
 import { PromptQlExecutor } from "./promptql.ts";
+import { ConolWebExecutor } from "./conol-web.ts";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -84,6 +86,8 @@ const executors = {
   "amazon-q": new KiroExecutor("amazon-q"),
   bedrock: new BedrockExecutor(),
   codex: new CodexExecutor(),
+  "chatgpt-web-codex": new ChatGptWebCodexExecutor(),
+  "cgpt-codex": new ChatGptWebCodexExecutor(),
   cursor: new CursorExecutor(),
   trae: new TraeExecutor(),
   glm: new GlmExecutor("glm"),
@@ -209,6 +213,9 @@ const executors = {
   xai: new XaiExecutor(),
   "xai-oauth": new XaiExecutor("xai-oauth"),
   xao: new XaiExecutor("xai-oauth"),
+  qw: new QwenWebExecutor(), // Alias
+  "conol-web": new ConolWebExecutor(),
+  cnl: new ConolWebExecutor(), // Alias
 };
 
 const defaultCache = new Map();
@@ -306,3 +313,4 @@ export { XaiExecutor } from "./xai.ts";
 export { MoonshotExecutor } from "./moonshot.ts";
 export { CheaperInferenceExecutor } from "./cheaperinference.ts";
 export { PromptQlExecutor } from "./promptql.ts";
+export { ConolWebExecutor } from "./conol-web.ts";

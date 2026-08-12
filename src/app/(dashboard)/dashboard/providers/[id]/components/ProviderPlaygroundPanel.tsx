@@ -6,6 +6,7 @@
 // a single-kind panel or the LlmChatCard for standard LLM providers.
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { LlmChatCard } from "@/app/(dashboard)/dashboard/media-providers/components/LlmChatCard";
 import { ServiceKindTabs } from "@/app/(dashboard)/dashboard/media-providers/components/ServiceKindTabs";
 import { EmbeddingExampleCard } from "@/app/(dashboard)/dashboard/media-providers/components/EmbeddingExampleCard";
@@ -18,6 +19,7 @@ import { VideoExampleCard } from "@/app/(dashboard)/dashboard/media-providers/co
 import { MusicExampleCard } from "@/app/(dashboard)/dashboard/media-providers/components/MusicExampleCard";
 import type { ServiceKind } from "@/shared/constants/providers";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { providerText } from "../providerPageHelpers";
 
 export const MEDIA_SERVICE_KINDS: ServiceKind[] = [
   "embedding",
@@ -107,7 +109,7 @@ export default function ProviderPlaygroundPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Playground</h2>
+      <h2 className="text-lg font-semibold">{providerText(t, "playgroundTitle", "Playground")}</h2>
       <ServiceKindTabs
         kinds={playgroundableKinds}
         activeKind={activeKind}

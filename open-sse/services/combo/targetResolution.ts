@@ -113,6 +113,7 @@ export interface ResolveComboTargetPipelineDeps {
    */
   buildAutoCandidates: ResolveAutoStrategyDeps["buildAutoCandidates"];
   hiddenModelsByProvider?: HiddenModelsByProvider;
+  /** Native Responses clients (for example Codex CLI/Desktop) manage compaction themselves. */
   clientManagedResponsesContext?: boolean;
 }
 
@@ -453,6 +454,7 @@ async function orderByStrategy(
     body,
     log,
     apiKeyAllowedConnections: deps.apiKeyAllowedConnections,
+    sessionKey: deps.relayOptions?.sessionId,
   });
   return { orderedTargets, autoUsedExplicitRouter: false };
 }
@@ -682,7 +684,8 @@ async function applyPromptCacheStage(
     promptCacheAffinityTargets,
     body,
     promptCacheAffinityEnabled,
-    isDeterministicStrategy ? "model" : "global"
+    isDeterministicStrategy ? "model" : "global",
+    deps.relayOptions?.sessionId
   );
   if (!promptCacheAffinity.applied) return orderedTargets;
   const protectedOriginal =
