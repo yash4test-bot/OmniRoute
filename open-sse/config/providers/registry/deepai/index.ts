@@ -1,4 +1,4 @@
-import type { RegistryEntry } from "../../shared.ts";
+import type { RegistryEntry } from "../../shared";
 
 export const deepaiProvider: RegistryEntry = {
   id: "deepai",
@@ -7,7 +7,6 @@ export const deepaiProvider: RegistryEntry = {
   baseUrl: "https://api.deepai.org",
   authType: "apikey",
   authHeader: "api-key",
-  models: [
-    { id: "text2img", name: "Text to Image" },
-  ],
+  executor: "default",
+  models: [{ id: "text2img", name: "Text to Image" }],
 };
