@@ -58,11 +58,11 @@ test("each agentSkillTool has name, description, inputSchema, and handler", () =
 
 // ─── omniroute_agent_skills_list ────────────────────────────────────────────
 
-test("omniroute_agent_skills_list with no filters returns all 45 skills", async () => {
+test("omniroute_agent_skills_list with no filters returns all 46 skills", async () => {
   const result = await agentSkillTools.omniroute_agent_skills_list.handler({});
-  assert.equal(result.count, 45, `Expected 45 but got ${result.count}`);
+  assert.equal(result.count, 46, `Expected 46 but got ${result.count}`);
   assert.ok(Array.isArray(result.skills));
-  assert.equal(result.skills.length, 45);
+  assert.equal(result.skills.length, 46);
 });
 
 test("omniroute_agent_skills_list({category:'api'}) returns exactly 23 entries", async () => {
